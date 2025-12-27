@@ -1,0 +1,32 @@
+{
+  "short_name": "Loop",
+  "name": "Loop: Friendship Orbit",
+  "description": "A mental health space for young people to understand and strengthen friendships.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#030712",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#6366f1",
+  "orientation": "portrait",
+  "categories": ["health", "social", "education"]
+}
