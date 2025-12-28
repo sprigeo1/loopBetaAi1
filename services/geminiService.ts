@@ -1,19 +1,11 @@
-
-// Always use process.env.API_KEY directly for initialization
 import { GoogleGenAI, Type } from "@google/genai";
 import { GRACE_SYSTEM_INSTRUCTION, SAFETY_CHECK_PROMPT } from "../constants";
 import { LoopAction } from "../types";
 
-// Defensive check for process to prevent crash in environments without node polyfills
-const getApiKey = () => {
-  try {
-    return process.env.API_KEY || '';
-  } catch (e) {
-    return '';
-  }
+// Always use process.env.API_KEY directly for initialization
+const getAIClient = () => {
+  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 };
-
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 interface SafetyCheckResult {
   isSafe: boolean;
@@ -22,9 +14,10 @@ interface SafetyCheckResult {
 }
 
 async function checkInputSafetyAndRelevance(input: string): Promise<SafetyCheckResult> {
-  const apiKey = getApiKey();
+  const apiKey = process.env.API_KEY;
   if (!apiKey) return { isSafe: true, isRelevant: true };
 
+  const ai = getAIClient();
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -44,20 +37,17 @@ async function checkInputSafetyAndRelevance(input: string): Promise<SafetyCheckR
     });
     return JSON.parse(response.text || '{}') as SafetyCheckResult;
   } catch (error) {
+    console.error("Safety Check Error:", error);
     return { isSafe: true, isRelevant: true };
   }
 }
 
-/**
- * Hardened JSON extraction.
- * Ensures internal control signals NEVER appear to the user.
- */
 function cleanGraceResponse(rawText: string): { cleanText: string; action?: LoopAction; insight?: any } {
   let text = rawText;
   let action: LoopAction | undefined;
   let insight: any | undefined;
 
-  // 1. Regex to find any JSON-like structures at the end of the text
+  // Extract JSON command if present at the end of the response
   const jsonMatch = text.match(/\{[\s\n]*"type":[\s\n]*"[A-Z_]+".*?\}[\s\n]*$/s);
   if (jsonMatch) {
     try {
@@ -65,27 +55,10 @@ function cleanGraceResponse(rawText: string): { cleanText: string; action?: Loop
       if (data.type) action = { type: data.type, payload: data.payload };
       if (data.insight) insight = data.insight;
       text = text.replace(jsonMatch[0], '').trim();
-    } catch (e) {
-      // If it fails to parse, it might be partial.
-    }
+    } catch (e) {}
   }
 
-  // 2. Extra safety: Strip anything following triple newlines if it looks like JSON
-  const parts = text.split('\n\n\n');
-  if (parts.length > 1) {
-    const lastPart = parts[parts.length - 1].trim();
-    if (lastPart.startsWith('{') && lastPart.endsWith('}')) {
-      try {
-        if (!action) {
-            const data = JSON.parse(lastPart);
-            if (data.type) action = { type: data.type, payload: data.payload };
-        }
-        text = parts.slice(0, -1).join('\n\n\n').trim();
-      } catch (e) {}
-    }
-  }
-
-  // 3. Final sanitization: Remove all backticks and explicit code blocks
+  // Final cleanup of markdown artifacts
   text = text
     .replace(/```json[\s\S]*?```/g, '')
     .replace(/```[\s\S]*?```/g, '')
@@ -99,9 +72,11 @@ export async function sendMessageToGrace(
   history: { role: string; parts: { text: string }[] }[],
   currentInput: string
 ): Promise<{ text: string; isSafetyResource: boolean; action?: LoopAction; insight?: any }> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    return { text: "Connection to the stars is currently offline. Please ensure your API key is set.", isSafetyResource: false };
+  if (!process.env.API_KEY) {
+    return { 
+      text: "The Loop is currently disconnected from its creative core. Please ensure the API_KEY environment variable is set in your project settings and the app is redeployed.", 
+      isSafetyResource: false 
+    };
   }
 
   const safetyCheck = await checkInputSafetyAndRelevance(currentInput);
@@ -113,7 +88,6 @@ export async function sendMessageToGrace(
     };
   }
 
-  // Specific guardrail for sexual topics
   if (safetyCheck.isSexualTopic) {
     return {
       text: "I hear you, and it's totally natural to have questions about that. Since my focus is on helping you navigate the orbits of friendship and social signals, I'm not the best one to dive into that topic. I'd really encourage you to share these questions with a trusted friend or an adult you feel safe with—like a parent, teacher, or counselor.",
@@ -121,6 +95,7 @@ export async function sendMessageToGrace(
     };
   }
 
+  const ai = getAIClient();
   try {
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview', 
@@ -128,7 +103,10 @@ export async function sendMessageToGrace(
         systemInstruction: GRACE_SYSTEM_INSTRUCTION,
         temperature: 0.8,
       },
-      history: history.map(h => ({ role: h.role, parts: h.parts })),
+      history: history.map(h => ({ 
+        role: h.role === 'model' ? 'model' : 'user', 
+        parts: h.parts 
+      })),
     });
 
     const result = await chat.sendMessage({ message: currentInput });
@@ -142,6 +120,9 @@ export async function sendMessageToGrace(
     };
   } catch (error) {
     console.error("Grace Error:", error);
-    return { text: "The stars are a bit fuzzy right now. Let's try that again in a heartbeat.", isSafetyResource: false };
+    return { 
+      text: "The connection to the stars is flickering. Let's try that again in a moment.", 
+      isSafetyResource: false 
+    };
   }
 }
