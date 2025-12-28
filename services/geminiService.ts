@@ -2,22 +2,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { GRACE_SYSTEM_INSTRUCTION, SAFETY_CHECK_PROMPT } from "../constants";
 import { LoopAction } from "../types";
 
-// Always use process.env.API_KEY directly for initialization
-const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-};
+/**
+ * Perform a quick safety and relevance check on the user input.
+ * Uses gemini-3-flash-preview for speed and efficiency.
+ */
+async function checkInputSafetyAndRelevance(input: string): Promise<{ isSafe: boolean; isRelevant: boolean; isSexualTopic: boolean }> {
+  if (!process.env.API_KEY) {
+    return { isSafe: true, isRelevant: true, isSexualTopic: false };
+  }
 
-interface SafetyCheckResult {
-  isSafe: boolean;
-  isRelevant: boolean;
-  isSexualTopic?: boolean;
-}
-
-async function checkInputSafetyAndRelevance(input: string): Promise<SafetyCheckResult> {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return { isSafe: true, isRelevant: true };
-
-  const ai = getAIClient();
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -31,23 +25,30 @@ async function checkInputSafetyAndRelevance(input: string): Promise<SafetyCheckR
             isRelevant: { type: Type.BOOLEAN },
             isSexualTopic: { type: Type.BOOLEAN },
           },
-          required: ['isSafe', 'isRelevant'],
+          required: ['isSafe', 'isRelevant', 'isSexualTopic'],
         }
       }
     });
-    return JSON.parse(response.text || '{}') as SafetyCheckResult;
+
+    const text = response.text;
+    if (!text) return { isSafe: true, isRelevant: true, isSexualTopic: false };
+    
+    return JSON.parse(text);
   } catch (error) {
-    console.error("Safety Check Error:", error);
-    return { isSafe: true, isRelevant: true };
+    console.error("Safety check failed:", error);
+    return { isSafe: true, isRelevant: true, isSexualTopic: false };
   }
 }
 
-function cleanGraceResponse(rawText: string): { cleanText: string; action?: LoopAction; insight?: any } {
+/**
+ * Extracts possible JSON actions from Grace's markdown response.
+ */
+function parseGraceResponse(rawText: string): { cleanText: string; action?: LoopAction; insight?: any } {
   let text = rawText;
   let action: LoopAction | undefined;
   let insight: any | undefined;
 
-  // Extract JSON command if present at the end of the response
+  // Look for JSON at the end of the response
   const jsonMatch = text.match(/\{[\s\n]*"type":[\s\n]*"[A-Z_]+".*?\}[\s\n]*$/s);
   if (jsonMatch) {
     try {
@@ -58,7 +59,7 @@ function cleanGraceResponse(rawText: string): { cleanText: string; action?: Loop
     } catch (e) {}
   }
 
-  // Final cleanup of markdown artifacts
+  // Clean up any remaining markdown blocks
   text = text
     .replace(/```json[\s\S]*?```/g, '')
     .replace(/```[\s\S]*?```/g, '')
@@ -68,49 +69,56 @@ function cleanGraceResponse(rawText: string): { cleanText: string; action?: Loop
   return { cleanText: text, action, insight };
 }
 
+/**
+ * Main interaction point with Grace.
+ * Uses the latest Gemini 3 Flash model.
+ */
 export async function sendMessageToGrace(
   history: { role: string; parts: { text: string }[] }[],
   currentInput: string
 ): Promise<{ text: string; isSafetyResource: boolean; action?: LoopAction; insight?: any }> {
+  // 1. Check for API Key
   if (!process.env.API_KEY) {
     return { 
-      text: "The Loop is currently disconnected from its creative core. Please ensure the API_KEY environment variable is set in your project settings and the app is redeployed.", 
+      text: "Connection to the stars is currently offline. Please ensure your API_KEY is set in Vercel environment variables and the app is redeployed.", 
       isSafetyResource: false 
     };
   }
 
-  const safetyCheck = await checkInputSafetyAndRelevance(currentInput);
+  // 2. Safety Check
+  const safety = await checkInputSafetyAndRelevance(currentInput);
 
-  if (!safetyCheck.isSafe) {
+  if (!safety.isSafe) {
     return {
       text: "I hear that you are in pain, and I want you to be safe. You matter. Text HOME to 741741 or call 988. I am here for you, but your safety requires more help than I can give alone.",
       isSafetyResource: true
     };
   }
 
-  if (safetyCheck.isSexualTopic) {
+  if (safety.isSexualTopic) {
     return {
       text: "I hear you, and it's totally natural to have questions about that. Since my focus is on helping you navigate the orbits of friendship and social signals, I'm not the best one to dive into that topic. I'd really encourage you to share these questions with a trusted friend or an adult you feel safe with—like a parent, teacher, or counselor.",
       isSafetyResource: false
     };
   }
 
-  const ai = getAIClient();
+  // 3. Generate Content
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
-    const chat = ai.chats.create({
-      model: 'gemini-3-flash-preview', 
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        ...history.map(h => ({ role: h.role === 'model' ? 'model' : 'user', parts: h.parts })),
+        { role: 'user', parts: [{ text: currentInput }] }
+      ],
       config: {
         systemInstruction: GRACE_SYSTEM_INSTRUCTION,
         temperature: 0.8,
+        topP: 0.95,
       },
-      history: history.map(h => ({ 
-        role: h.role === 'model' ? 'model' : 'user', 
-        parts: h.parts 
-      })),
     });
 
-    const result = await chat.sendMessage({ message: currentInput });
-    const { cleanText, action, insight } = cleanGraceResponse(result.text || "");
+    const { cleanText, action, insight } = parseGraceResponse(response.text || "");
 
     return {
       text: cleanText,
@@ -121,7 +129,7 @@ export async function sendMessageToGrace(
   } catch (error) {
     console.error("Grace Error:", error);
     return { 
-      text: "The connection to the stars is flickering. Let's try that again in a moment.", 
+      text: "The stars are a bit fuzzy. Could you try saying that again?", 
       isSafetyResource: false 
     };
   }
