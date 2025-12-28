@@ -4,7 +4,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { GRACE_SYSTEM_INSTRUCTION, SAFETY_CHECK_PROMPT } from "../constants";
 import { LoopAction } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Defensive check for process to prevent crash in environments without node polyfills
+const getApiKey = () => {
+  try {
+    return process.env.API_KEY || '';
+  } catch (e) {
+    return '';
+  }
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 interface SafetyCheckResult {
   isSafe: boolean;
@@ -13,6 +22,9 @@ interface SafetyCheckResult {
 }
 
 async function checkInputSafetyAndRelevance(input: string): Promise<SafetyCheckResult> {
+  const apiKey = getApiKey();
+  if (!apiKey) return { isSafe: true, isRelevant: true };
+
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -54,7 +66,7 @@ function cleanGraceResponse(rawText: string): { cleanText: string; action?: Loop
       if (data.insight) insight = data.insight;
       text = text.replace(jsonMatch[0], '').trim();
     } catch (e) {
-      // If it fails to parse, it might be partial. We'll try a more aggressive split below.
+      // If it fails to parse, it might be partial.
     }
   }
 
@@ -87,6 +99,11 @@ export async function sendMessageToGrace(
   history: { role: string; parts: { text: string }[] }[],
   currentInput: string
 ): Promise<{ text: string; isSafetyResource: boolean; action?: LoopAction; insight?: any }> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    return { text: "Connection to the stars is currently offline. Please ensure your API key is set.", isSafetyResource: false };
+  }
+
   const safetyCheck = await checkInputSafetyAndRelevance(currentInput);
 
   if (!safetyCheck.isSafe) {
