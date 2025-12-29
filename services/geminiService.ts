@@ -3,6 +3,13 @@ import { GRACE_SYSTEM_INSTRUCTION, SAFETY_CHECK_PROMPT } from "../constants";
 import { LoopAction } from "../types";
 
 /**
+ * Checks if the API Key is available in the environment.
+ */
+export function isGraceOnline(): boolean {
+  return !!process.env.API_KEY && process.env.API_KEY.length > 10;
+}
+
+/**
  * Perform a quick safety and relevance check on the user input.
  * Uses gemini-3-flash-preview for speed and efficiency.
  */
@@ -80,7 +87,7 @@ export async function sendMessageToGrace(
   // 1. Check for API Key
   if (!process.env.API_KEY) {
     return { 
-      text: "Connection to the stars is currently offline. Please ensure your API_KEY is set in Vercel environment variables and the app is redeployed.", 
+      text: "Connection to the stars is currently offline. Please ensure your API_KEY environment variable is set in your deployment settings and the app is redeployed.", 
       isSafetyResource: false 
     };
   }
@@ -126,10 +133,19 @@ export async function sendMessageToGrace(
       action,
       insight
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Grace Error:", error);
+    
+    // Check for specific API key errors
+    if (error.status === 401 || error.message?.includes('401')) {
+       return {
+         text: "The stars can't recognize our current connection key. Please check that the API key provided is valid.",
+         isSafetyResource: false
+       };
+    }
+
     return { 
-      text: "The stars are a bit fuzzy. Could you try saying that again?", 
+      text: "The stars are a bit fuzzy right now. Could you try saying that again?", 
       isSafetyResource: false 
     };
   }

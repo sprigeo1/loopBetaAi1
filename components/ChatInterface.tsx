@@ -1,7 +1,7 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, LoopAction } from '../types';
 import { InfinityLogo } from './InfinityLogo';
+import { isGraceOnline } from '../services/geminiService';
 
 interface Props {
   chatHistory: Message[];
@@ -12,8 +12,14 @@ interface Props {
 
 const ChatInterface: React.FC<Props> = ({ chatHistory, isThinking = false, onSendMessage, onAction }) => {
   const [input, setInput] = useState('');
+  const [isOnline, setIsOnline] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check connection on mount
+  useEffect(() => {
+    setIsOnline(isGraceOnline());
+  }, []);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -36,12 +42,26 @@ const ChatInterface: React.FC<Props> = ({ chatHistory, isThinking = false, onSen
   return (
     <div className="flex flex-col h-full bg-transparent overflow-hidden">
       {/* Header - Subtle and transparent */}
-      <div className="p-5 flex items-center gap-4 bg-slate-900/60 backdrop-blur-md border-b border-white/5 shrink-0 z-10">
-        <InfinityLogo className="w-8 h-4 text-indigo-400" variant="infinity" />
-        <div className="flex flex-col">
-          <h3 className="text-xs font-bold tracking-[0.25em] uppercase text-white leading-none">Grace</h3>
-          <p className="text-[9px] text-slate-500 uppercase tracking-[0.15em] mt-1 font-medium">Reflective Intelligence</p>
+      <div className="p-5 flex items-center justify-between bg-slate-900/60 backdrop-blur-md border-b border-white/5 shrink-0 z-10">
+        <div className="flex items-center gap-4">
+          <InfinityLogo className="w-8 h-4 text-indigo-400" variant="infinity" />
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-bold tracking-[0.25em] uppercase text-white leading-none">Grace</h3>
+              <div 
+                className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${isOnline ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'bg-rose-500 animate-pulse'}`}
+                title={isOnline ? "Online" : "Offline"}
+              />
+            </div>
+            <p className="text-[9px] text-slate-500 uppercase tracking-[0.15em] mt-1 font-medium">Reflective Intelligence</p>
+          </div>
         </div>
+        
+        {!isOnline && (
+          <div className="text-[8px] font-bold text-rose-400/80 uppercase tracking-widest bg-rose-950/20 px-2 py-1 rounded border border-rose-500/20">
+            Link Lost
+          </div>
+        )}
       </div>
 
       {/* Messages Area */}
@@ -86,14 +106,15 @@ const ChatInterface: React.FC<Props> = ({ chatHistory, isThinking = false, onSen
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={isThinking ? "Grace is reflecting..." : "Share a thought..."}
-            className="w-full bg-slate-800/40 border border-slate-700/50 text-white rounded-[30px] py-4 px-6 pr-14 focus:outline-none focus:border-indigo-500/50 transition-all font-light placeholder:text-slate-600 text-base"
+            placeholder={isThinking ? "Grace is reflecting..." : isOnline ? "Share a thought..." : "Connection offline..."}
+            className={`w-full bg-slate-800/40 border text-white rounded-[30px] py-4 px-6 pr-14 focus:outline-none transition-all font-light placeholder:text-slate-600 text-base ${isOnline ? 'border-slate-700/50 focus:border-indigo-500/50' : 'border-rose-900/50 cursor-not-allowed opacity-60'}`}
             autoComplete="off"
             autoFocus
+            disabled={!isOnline}
           />
           <button 
             onClick={handleSend} 
-            disabled={!input.trim() || isThinking} 
+            disabled={!input.trim() || isThinking || !isOnline} 
             className="absolute right-2 p-3 bg-indigo-600 rounded-full hover:bg-indigo-500 disabled:bg-slate-700 disabled:opacity-40 transition-all shadow-lg active:scale-90"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white">
@@ -101,6 +122,9 @@ const ChatInterface: React.FC<Props> = ({ chatHistory, isThinking = false, onSen
             </svg>
           </button>
         </div>
+        {!isOnline && (
+           <p className="text-[10px] text-center text-rose-400/60 mt-4 uppercase tracking-[0.2em] font-bold">API Key Missing in Deployment</p>
+        )}
       </div>
     </div>
   );
